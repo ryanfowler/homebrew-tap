@@ -1,0 +1,154 @@
+name: Update Fetch
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [update-fetch]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api repos/ryanfowler/fetch/releases/latest --jq '.tag_name')
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check if already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "fetch-v${{ steps.release.outputs.version }}" > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout fetch source
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: ryanfowler/fetch
+          ref: ${{ steps.release.outputs.tag }}
+          path: fetch-src
+
+      - name: Set up Go
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: fetch-src/go.mod
+
+      - name: Build binaries
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          ldflags="-s -w -buildid= -X github.com/ryanfowler/fetch/internal/core.packageManager=Homebrew"
+          targets="darwin-amd64 darwin-arm64 linux-amd64 linux-arm64"
+          for target in $targets; do
+            os="${target%-*}"
+            arch="${target#*-}"
+            echo "Building $os/$arch..."
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -C fetch-src -trimpath -ldflags="$ldflags" -o "../fetch-${target}/fetch" .
+            tar -czf "fetch-${target}.tar.gz" -C "fetch-${target}" fetch
+          done
+
+      - name: Compute checksums
+        if: steps.check.outputs.skip == 'false'
+        id: sha
+        run: |
+          for target in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            sha=$(sha256sum "fetch-${target}.tar.gz" | awk '{print $1}')
+            key="sha_$(echo "$target" | tr '-' '_')"
+            echo "${key}=$sha" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Create GitHub release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "fetch-v${{ steps.release.outputs.version }}" \
+            --title "fetch v${{ steps.release.outputs.version }}" \
+            --notes "fetch v${{ steps.release.outputs.version }}" \
+            fetch-darwin-amd64.tar.gz \
+            fetch-darwin-arm64.tar.gz \
+            fetch-linux-amd64.tar.gz \
+            fetch-linux-arm64.tar.gz
+
+      - name: Update formula
+        if: steps.check.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA_DARWIN_AMD64: ${{ steps.sha.outputs.sha_darwin_amd64 }}
+          SHA_DARWIN_ARM64: ${{ steps.sha.outputs.sha_darwin_arm64 }}
+          SHA_LINUX_AMD64: ${{ steps.sha.outputs.sha_linux_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.sha.outputs.sha_linux_arm64 }}
+        run: |
+          TAG="fetch-v${VERSION}"
+          BASE_URL="https://github.com/ryanfowler/homebrew-tap/releases/download/${TAG}"
+          cat > Formula/fetch.rb << 'EOF'
+          class Fetch < Formula
+            desc "Modern HTTP(S) client for the command line"
+            homepage "https://github.com/ryanfowler/fetch"
+            version "__VERSION__"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "__BASE_URL__/fetch-darwin-arm64.tar.gz"
+                sha256 "__SHA_DARWIN_ARM64__"
+              elsif Hardware::CPU.intel?
+                url "__BASE_URL__/fetch-darwin-amd64.tar.gz"
+                sha256 "__SHA_DARWIN_AMD64__"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "__BASE_URL__/fetch-linux-arm64.tar.gz"
+                sha256 "__SHA_LINUX_ARM64__"
+              elsif Hardware::CPU.intel?
+                url "__BASE_URL__/fetch-linux-amd64.tar.gz"
+                sha256 "__SHA_LINUX_AMD64__"
+              end
+            end
+
+            def install
+              bin.install "fetch"
+              generate_completions_from_executable(bin/"fetch", "--complete")
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/fetch --version")
+            end
+          end
+          EOF
+          sed -i 's/^          //' Formula/fetch.rb
+          sed -i "s|__VERSION__|${VERSION}|g" Formula/fetch.rb
+          sed -i "s|__BASE_URL__|${BASE_URL}|g" Formula/fetch.rb
+          sed -i "s|__SHA_DARWIN_ARM64__|${SHA_DARWIN_ARM64}|g" Formula/fetch.rb
+          sed -i "s|__SHA_DARWIN_AMD64__|${SHA_DARWIN_AMD64}|g" Formula/fetch.rb
+          sed -i "s|__SHA_LINUX_ARM64__|${SHA_LINUX_ARM64}|g" Formula/fetch.rb
+          sed -i "s|__SHA_LINUX_AMD64__|${SHA_LINUX_AMD64}|g" Formula/fetch.rb
+
+      - name: Commit and push
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          git diff --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/fetch.rb
+          git commit -m "Update fetch to ${{ steps.release.outputs.version }}"
+          git push
