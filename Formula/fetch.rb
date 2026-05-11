@@ -1,26 +1,26 @@
 class Fetch < Formula
   desc "Modern HTTP(S) client for the command line"
   homepage "https://github.com/ryanfowler/fetch"
-  version "0.23.0"
+  version "0.23.1"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.0/fetch-darwin-arm64.tar.gz"
-      sha256 "0dbf4bf62733148a4b0871cad3ee8e102912d551c85c2cf42e2531d398048e5a"
+      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.1/fetch-darwin-arm64.tar.gz"
+      sha256 "25ec1065dd53f3363b40f6342cc52790114189359ce535fc6a065068662748b9"
     elsif Hardware::CPU.intel?
-      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.0/fetch-darwin-amd64.tar.gz"
-      sha256 "e440124124cf3b624e24ba12c1e6c295d737e88a3eafd4a3fafc291f4ac77c7c"
+      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.1/fetch-darwin-amd64.tar.gz"
+      sha256 "282db6a1e632b821dca72856c5b55a3147e8c07fd6225fc1f86366f7c366b1c7"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.0/fetch-linux-arm64.tar.gz"
-      sha256 "322e16c98006f29ad23c3b2e33f3b8f146a0caa064cfa07c822c0570b1cbb861"
+      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.1/fetch-linux-arm64.tar.gz"
+      sha256 "2046db1845ae00ecab50631c17a0bdbf5d765b47a7250e34bc2780a4b0c699b5"
     elsif Hardware::CPU.intel?
-      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.0/fetch-linux-amd64.tar.gz"
-      sha256 "a54c1d2ec54864b4436236075345969fc341b6b8d138bc0b2b8af4749512a30f"
+      url "https://github.com/ryanfowler/homebrew-tap/releases/download/fetch-v0.23.1/fetch-linux-amd64.tar.gz"
+      sha256 "2422f1719986a3989113b0d62904a79422eed79e1adc95de1c4f9e3ff33a6576"
     end
   end
 
