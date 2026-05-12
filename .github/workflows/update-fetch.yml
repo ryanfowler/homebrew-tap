@@ -46,7 +46,7 @@ jobs:
 
       - name: Set up Go
         if: steps.check.outputs.skip == 'false'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: fetch-src/go.mod
 
