@@ -15,53 +15,56 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get latest release
+      - name: Get fetch release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
         run: |
-          tag=$(gh api repos/ryanfowler/fetch/releases/latest --jq '.tag_name')
+          if [ -n "$DISPATCH_VERSION" ]; then
+            tag="$DISPATCH_VERSION"
+          else
+            tag=$(gh api repos/ryanfowler/fetch/releases/latest --jq '.tag_name')
+          fi
+          case "$tag" in
+            v*) ;;
+            *) tag="v${tag}" ;;
+          esac
           version="${tag#v}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Check if already released
+      - name: Check if formula is current
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          formula_current=false
+          release_current=false
+          if grep -q 'version "${{ steps.release.outputs.version }}"' Formula/fetch.rb; then
+            formula_current=true
+          fi
           if gh release view "fetch-v${{ steps.release.outputs.version }}" > /dev/null 2>&1; then
+            release_current=true
+          fi
+          if [ "$formula_current" = true ] && [ "$release_current" = true ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout fetch source
+      - name: Download fetch release archives
         if: steps.check.outputs.skip == 'false'
-        uses: actions/checkout@v4
-        with:
-          repository: ryanfowler/fetch
-          ref: ${{ steps.release.outputs.tag }}
-          path: fetch-src
-
-      - name: Set up Go
-        if: steps.check.outputs.skip == 'false'
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: fetch-src/go.mod
-
-      - name: Build binaries
-        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
-          ldflags="-s -w -buildid= -X github.com/ryanfowler/fetch/internal/core.packageManager=Homebrew"
           targets="darwin-amd64 darwin-arm64 linux-amd64 linux-arm64"
           for target in $targets; do
-            os="${target%-*}"
-            arch="${target#*-}"
-            echo "Building $os/$arch..."
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-              go build -C fetch-src -trimpath -ldflags="$ldflags" -o "../fetch-${target}/fetch" .
-            tar -czf "fetch-${target}.tar.gz" -C "fetch-${target}" fetch
+            gh release download "$TAG" \
+              --repo ryanfowler/fetch \
+              --pattern "fetch-${TAG}-${target}.tar.gz" \
+              --output "fetch-${target}.tar.gz"
           done
 
       - name: Compute checksums
@@ -74,18 +77,21 @@ jobs:
             echo "${key}=$sha" >> "$GITHUB_OUTPUT"
           done
 
-      - name: Create GitHub release
+      - name: Create or update tap release
         if: steps.check.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "fetch-v${{ steps.release.outputs.version }}" \
-            --title "fetch v${{ steps.release.outputs.version }}" \
-            --notes "fetch v${{ steps.release.outputs.version }}" \
-            fetch-darwin-amd64.tar.gz \
-            fetch-darwin-arm64.tar.gz \
-            fetch-linux-amd64.tar.gz \
-            fetch-linux-arm64.tar.gz
+          tag="fetch-v${{ steps.release.outputs.version }}"
+          assets="fetch-darwin-amd64.tar.gz fetch-darwin-arm64.tar.gz fetch-linux-amd64.tar.gz fetch-linux-arm64.tar.gz"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" $assets --clobber
+          else
+            gh release create "$tag" \
+              --title "fetch v${{ steps.release.outputs.version }}" \
+              --notes "fetch v${{ steps.release.outputs.version }}" \
+              $assets
+          fi
 
       - name: Update formula
         if: steps.check.outputs.skip == 'false'
